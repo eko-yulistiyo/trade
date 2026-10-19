@@ -1,0 +1,65 @@
+flowchart TD
+    %% PAPER TRADING SIMULATION & COMPOUNDING FLOWCHART - AUTO-TRADE-AA
+
+    START([Mulai Siklus Eksekusi Paper Trading]) --> RECEIVE_SIGNAL[Terima Sinyal Terverifikasi<br/>dari Deterministic Risk Gate]
+
+    RECEIVE_SIGNAL --> CALC_LOT[Kalkulasi Besaran Lot Sizing:<br/>Size = Equity x 0.005 / Delta SL<br/>Pastikan Memenuhi Min Lot & Tick Size]
+
+    CALC_LOT --> CREATE_ORDER[Buat Record paper_orders<br/>Status: SUBMITTED, Tipe: Market/Limit]
+
+    CREATE_ORDER --> MATCHING_SIM[Simulasi Matching Engine:<br/>• Ambil Harga Best Bid/Ask Terkini<br/>• Hitung Slippage Berbasis Kedalaman Pool/Book<br/>• Bebankan Fee Bybit Spot 0.1% / Solana 0.25%]
+
+    MATCHING_SIM --> FILL_SIM{Simulasi Pemenuhan Fill}
+    FILL_SIM -- Partial Fill --> SET_PARTIAL[Status Order: PARTIAL_FILLED<br/>Buat Record paper_trades]
+    FILL_SIM -- Full Fill --> SET_FULL[Status Order: FILLED<br/>Buat Record paper_trades]
+
+    SET_PARTIAL --> INIT_POSITION
+    SET_FULL --> INIT_POSITION
+
+    subgraph ACTIVE_POSITION_MONITOR["MONITORING POSISI AKTIF & EXIT RULES (KOTAK 4 & 5)"]
+        INIT_POSITION[Buka Posisi di Tabel positions:<br/>• Pasang Hard Stop Loss (SL)<br/>• Pasang TP1: Rasio 1.5R (Alokasi 50%)<br/>• Pasang TP2: Rasio 3.0R (Alokasi 50%)<br/>• Aktifkan Trailing Stop ATR jika Trend Kuat]
+
+        INIT_POSITION --> PRICE_LOOP[Loop Pemantauan Harga Real-Time<br/>Hitung Mark-to-Market Unrealized PnL]
+
+        PRICE_LOOP --> EXIT_TRIGGER{Pemeriksaan Kondisi Exit}
+
+        %% Kondisi Stop Loss
+        EXIT_TRIGGER -- Harga Menyentuh SL --> SL_HIT[Trigger: STOP LOSS HIT<br/>Tutup Sisa Posisi Pasar]
+        SL_HIT --> RECORD_LOSS[Catat Realized PnL Negatif<br/>Maksimal Kerugian: 0.5% Equity]
+
+        %% Kondisi Take Profit 1
+        EXIT_TRIGGER -- Harga Menyentuh TP1 (1.5R) --> TP1_HIT[Trigger: TAKE PROFIT 1 HIT<br/>Tutup 50% Kuantitas Posisi]
+        TP1_HIT --> MOVE_BREAKEVEN[Kunci Keuntungan Parsial FIFO<br/>Geser Stop Loss ke Harga Masuk (Breakeven)]
+        MOVE_BREAKEVEN --> PRICE_LOOP
+
+        %% Kondisi Take Profit 2
+        EXIT_TRIGGER -- Harga Menyentuh TP2 (3.0R) --> TP2_HIT[Trigger: TAKE PROFIT 2 HIT<br/>Tutup 100% Sisa Posisi]
+        TP2_HIT --> RECORD_WIN[Catat Realized PnL Positif Penuh]
+
+        %% Kondisi Trailing Stop
+        EXIT_TRIGGER -- Trailing Stop ATR Tersentuh --> TRAIL_HIT[Trigger: TRAILING STOP HIT<br/>Tutup Sisa Posisi pada Profit Terkunci]
+        TRAIL_HIT --> RECORD_WIN
+    end
+
+    RECORD_LOSS --> UPDATE_LEDGER[Perbarui Saldo Kas & Equity Ledger]
+    RECORD_WIN --> UPDATE_LEDGER
+
+    subgraph COMPOUNDING_ENGINE["ADAPTIVE COMPOUNDING & FEEDBACK (KOTAK 5)"]
+        UPDATE_LEDGER --> CHECK_HWM{Apakah Equity Mencetak<br/>High-Water Mark Baru?}
+        CHECK_HWM -- YA --> REINVEST_PROFIT[Reinvestasi Profit ke Modal:<br/>Tingkatkan Basis Sizing Transaksi Berikutnya]
+        CHECK_HWM -- TIDAK (DRAWDOWN) --> ADAPT_RISK{Level Drawdown Saat Ini?}
+
+        ADAPT_RISK -- DD >= 3% --> REDUCE_RISK_1[Kurangi Risiko per Trade: 0.35%]
+        ADAPT_RISK -- DD >= 5% --> REDUCE_RISK_2[Kurangi Risiko per Trade: 0.25%]
+        ADAPT_RISK -- DD >= 8% --> TRIGGER_CIRCUIT[Picu Circuit Breaker:<br/>Bekukan Strategi untuk Evaluasi Manual]
+
+        REINVEST_PROFIT --> UPDATE_METRICS
+        REDUCE_RISK_1 --> UPDATE_METRICS
+        REDUCE_RISK_2 --> UPDATE_METRICS
+        TRIGGER_CIRCUIT --> UPDATE_METRICS
+
+        UPDATE_METRICS[Hitung Ulang Metrik Portofolio:<br/>Win Rate %, Profit Factor, Expectancy Net, Sharpe Ratio]
+    end
+
+    UPDATE_METRICS --> SEND_NOTIF[Kirim Laporan Eksekusi & PnL ke Telegram & Web UI]
+    SEND_NOTIF --> END_SIM([Selesai Siklus Simulasi])

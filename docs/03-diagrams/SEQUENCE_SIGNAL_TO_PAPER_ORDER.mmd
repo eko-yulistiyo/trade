@@ -1,0 +1,62 @@
+sequenceDiagram
+    %% SEQUENCE DIAGRAM: SIGNAL-TO-PAPER-ORDER FLOW (INCLUDING RISK REJECTION)
+    autonumber
+
+    actor Operator as Operator / User
+    participant Ingestion as Ingestion Engine (Bybit/Solana)
+    participant Hermes as Hermes Multi-Agent
+    participant Skills as .agents/skills/
+    participant Gateway as AI Model Gateway
+    participant LLM as OpenRouter / 9Route
+    participant RiskGate as Deterministic Risk Gate
+    participant PaperBroker as Paper Broker Simulator
+    participant DB as PostgreSQL 16
+    participant Telegram as Telegram Bot Service
+
+    %% 1. Ingestion Event
+    Note over Ingestion,Hermes: 1. Ingestion Data Pasar & Swap Event
+    Ingestion->>DB: Simpan Raw Observation / Market Snapshot
+    Ingestion->>Hermes: Memicu Event Analisis Sinyal (Token / Symbol)
+
+    %% 2. Hermes Orchestration & Dynamic Skill Loading
+    Note over Hermes,Gateway: 2. Analisis Multi-Agent & Dynamic Skill
+    Hermes->>Skills: Baca market-regime-detection / signal-scoring-hybrid SKILL.md
+    Skills-->>Hermes: Kembalikan Konteks & Formula Terkompresi
+    Hermes->>Gateway: Kirim Prompt Ringkas + JSON Schema
+    Gateway->>LLM: HTTP Request (Timeout 15s)
+    LLM-->>Gateway: Respons JSON Terstruktur
+    Gateway->>Gateway: Validasi Skema Pydantic (Strict Mode)
+    Gateway-->>Hermes: Objek Sinyal Valid (BUY/SELL, Entry, SL, TP1, TP2)
+    Hermes->>DB: Catat Rekomendasi ke trading_signals (Status: PENDING)
+
+    %% 3. Evaluasi Risk Gate
+    Note over Hermes,RiskGate: 3. Evaluasi 9 Pintu Risk Gate Deterministik
+    Hermes->>RiskGate: Ajukan Sinyal untuk Validasi
+    RiskGate->>DB: Ambil Ekuitas Portofolio, Daily Loss, & High-Water Mark
+    RiskGate->>RiskGate: Evaluasi: Expectancy > 0, Risk 0.5%, Daily Loss 2%, DD 8%, Spread
+
+    %% Alternatif 1: Kasus Penolakan Risiko (REJECTED)
+    alt Kasus A: Sinyal Melanggar Batas Risiko (REJECTED)
+        RiskGate->>DB: Simpan risk_checks (Status: REJECTED, Reason: DAILY_LOSS_EXCEEDED)
+        RiskGate->>DB: Update trading_signals (Status: REJECTED)
+        RiskGate->>Telegram: Kirim Notifikasi Penolakan Risiko ke Operator
+        Telegram-->>Operator: Pesan: "⚠️ Sinyal Ditolak Risk Gate: Batas Kerugian Harian 2% Terlewati"
+    
+    %% Alternatif 2: Kasus Sinyal Lolos Risiko (PASSED)
+    else Kasus B: Sinyal Memenuhi Seluruh Aturan Risiko (PASSED)
+        RiskGate->>DB: Simpan risk_checks (Status: PASSED)
+        RiskGate->>PaperBroker: Teruskan Sinyal Lolos untuk Eksekusi Simulasi
+
+        %% 4. Eksekusi Paper Broker
+        Note over PaperBroker,DB: 4. Eksekusi Order Virtual & Sizing
+        PaperBroker->>PaperBroker: Hitung Lot Size Berbasis Risiko 0.5% Ekuitas
+        PaperBroker->>DB: Buat paper_orders (Status: SUBMITTED)
+        PaperBroker->>PaperBroker: Simulasikan Matching, Slippage Realistis, & Fee
+        PaperBroker->>DB: Simpan paper_trades (Status: FILLED)
+        PaperBroker->>DB: Buat Posisi Terbuka di positions (SL, TP1 50%, TP2)
+        PaperBroker->>DB: Perbarui Saldo Kas & Equity Ledger (Compounding)
+
+        %% 5. Notifikasi Sukses
+        PaperBroker->>Telegram: Kirim Notifikasi Eksekusi Paper Trade
+        Telegram-->>Operator: Pesan: "✅ Paper Order Eksekusi: BUY SOLUSDT @ 152.40 (SL: 149.35, TP1: 156.98)"
+    end

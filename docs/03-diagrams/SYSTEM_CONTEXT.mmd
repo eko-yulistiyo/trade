@@ -1,0 +1,73 @@
+graph TB
+    %% SYSTEM CONTEXT DIAGRAM - AUTO-TRADE-AA
+    %% C4 Context Level Visualization
+
+    subgraph USERS["Pengguna / Operator"]
+        USER["Operator Sistem / Solo Trader<br/>(Human-in-the-Loop)"]
+    end
+
+    subgraph CLIENT_INTERFACES["Kanal Akses Pengguna"]
+        WEB_UI["Web Dashboard<br/>[Next.js + Tailwind CSS]<br/>(Responsif & Real-time)"]
+        TG_CLIENT["Telegram Messenger App<br/>(Notifikasi & Remote Control)"]
+    end
+
+    subgraph PLATFORM_CORE["Sistem AUTO-TRADE-AA (Host: MacBook M1 Pro)"]
+        FASTAPI["Control & API Gateway<br/>[FastAPI Backend]"]
+        TG_BOT["Telegram Bot Service<br/>[Allowlist Auth Controller]"]
+        HERMES["Hermes Multi-Agent Orchestrator<br/>(Analisis Token, Market, & Sinyal)"]
+        SKILL_SYS["Dynamic AI Skills<br/>(.agents/skills/)"]
+        AI_GATEWAY["AI Model Gateway<br/>(Router, Fallback, Quota Manager)"]
+        RISK_ENGINE["Deterministic Risk Gate<br/>(Non-Bypassable Rule Engine)"]
+        PAPER_BROKER["Paper Broker & Compounding Engine<br/>(Execution & Position Manager)"]
+        INGESTION["Hybrid Ingestion Engine<br/>(Solana On-Chain + Bybit Spot)"]
+        
+        DB[("PostgreSQL 16 Database<br/>(Single Source of Truth)")]
+        REDIS[("Redis 7 Cache<br/>[Opsional Memory Store]")]
+    end
+
+    subgraph EXTERNAL_SYSTEMS["Sistem & Layanan Eksternal"]
+        BYBIT_API["Bybit Spot API<br/>(WebSocket Real-time & REST OHLCV)"]
+        SOLANA_NET["Jaringan Solana RPC / Helius<br/>(Blok, Transaksi, SPL Token)"]
+        MARKET_APIS["DEX Market Data APIs<br/>(DEXScreener / Birdeye / Raydium)"]
+        LLM_PRIMARY["OpenRouter AI API<br/>(Claude / Llama / Gemini)"]
+        LLM_SECONDARY["9Route AI API<br/>(Secondary Fallback Provider)"]
+        TG_API["Telegram Bot API<br/>(Webhook / Long Polling)"]
+    end
+
+    %% Hubungan Komunikasi
+    USER -->|Akses Dashboard via HTTPS| WEB_UI
+    USER -->|Kirim Perintah /kill, /status| TG_CLIENT
+    TG_CLIENT <-->|HTTPS API Polling/Webhook| TG_API
+
+    WEB_UI <-->|HTTPS REST API / JSON| FASTAPI
+    TG_API <-->|Pesan & Notifikasi| TG_BOT
+
+    FASTAPI --> INGESTION
+    FASTAPI --> HERMES
+    FASTAPI --> RISK_ENGINE
+    FASTAPI --> PAPER_BROKER
+
+    TG_BOT -->|Emergency Kill / Status| FASTAPI
+
+    INGESTION <-->|WSS & REST| BYBIT_API
+    INGESTION <-->|HTTPS RPC & WSS| SOLANA_NET
+    INGESTION <-->|HTTPS REST| MARKET_APIS
+
+    INGESTION -->|Data Mentah Normal| DB
+    INGESTION -.->|Cache Ringan| REDIS
+
+    HERMES <-->|Load On-Demand Skills| SKILL_SYS
+    HERMES -->|Prompt Terstruktur| AI_GATEWAY
+
+    AI_GATEWAY -->|HTTPS POST Primer| LLM_PRIMARY
+    AI_GATEWAY -.->|Fallback Otomatis| LLM_SECONDARY
+
+    HERMES -->|Sinyal Terstruktur JSON| RISK_ENGINE
+    RISK_ENGINE -->|Evaluasi Lolos (PASS)| PAPER_BROKER
+    RISK_ENGINE -->|Catat Keputusan| DB
+    RISK_ENGINE -->|Alert Penolakan| TG_BOT
+
+    PAPER_BROKER -->|Simulasi Fill & Pembukuan FIFO| DB
+    PAPER_BROKER -->|Notifikasi Eksekusi| TG_BOT
+
+    DB <-->|Read State & Analytics| FASTAPI

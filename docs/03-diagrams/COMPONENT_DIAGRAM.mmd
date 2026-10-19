@@ -1,0 +1,112 @@
+graph TB
+    %% COMPONENT ARCHITECTURE DIAGRAM - AUTO-TRADE-AA
+    %% C4 Component Level Visualization (Modular Monolith)
+
+    subgraph LAYER_1["1. Control & API Layer"]
+        ROUTER_API["FastAPI App & Routers<br/>• /api/v1/wallets<br/>• /api/v1/signals<br/>• /api/v1/positions<br/>• /api/v1/portfolio"]
+        AUTH_MIDDLEWARE["Auth Middleware<br/>(API Key Bearer Token)"]
+        TG_CONTROLLER["Telegram Controller<br/>• Command Handler (/status, /kill)<br/>• User ID Allowlist Filter"]
+    end
+
+    subgraph LAYER_2["2. Orchestration Layer (Hermes Multi-Agent)"]
+        HERMES_CORE["Hermes Orchestrator<br/>(State Graph & Task Dispatcher)"]
+        AGENT_TOKEN["Token Safety Agent<br/>(Audit Freeze/Mint & LP)"]
+        AGENT_MARKET["Market Context Agent<br/>(Volatilitas, Likuiditas, Regime)"]
+        AGENT_STRATEGY["Strategy Signal Agent<br/>(Sintesis Hybrid Sinyal)"]
+        AGENT_DISCOVERY["Trader Discovery Agent<br/>(Evaluasi Skor Wallet)"]
+    end
+
+    subgraph LAYER_3["3. AI & Model Gateway Layer"]
+        GATEWAY_MGR["Model Gateway Manager<br/>(Circuit Breaker, Quota, Timeout 15s)"]
+        ADAPTER_OPENROUTER["OpenRouter Adapter<br/>(Primary Provider)"]
+        ADAPTER_9ROUTE["9Route Adapter<br/>(Secondary Fallback)"]
+        SCHEMA_VALIDATOR["Pydantic Schema Validator<br/>(Strict JSON Parser)"]
+    end
+
+    subgraph LAYER_AI_SKILLS[".agents/skills/ (Dynamic AI Skills)"]
+        SKILL_REGIME["market-regime-detection"]
+        SKILL_SIGNAL["signal-scoring-hybrid"]
+        SKILL_RISK["risk-gate-validation"]
+        SKILL_SIZING["position-sizing-compounding"]
+        SKILL_SAFETY["token-and-contract-safety"]
+    end
+
+    subgraph LAYER_4["4. Domain & Trading Engine Layer"]
+        RISK_GATE["Deterministic Risk Gate<br/>• Expectancy > 0<br/>• Risk 0.5% Equity<br/>• Daily Loss 2%<br/>• Drawdown 8%"]
+        STRATEGY_ENG["Strategy Engine<br/>• Trend Following<br/>• Momentum Breakout<br/>• Mean Reversion<br/>• Copy-Trade Mirror"]
+        PAPER_BROKER_ENG["Paper Broker Matching<br/>• Market/Limit Simulator<br/>• Slippage & Fee Calc<br/>• Partial Fill Simulation"]
+        COMPOUNDING_LEDGER["Compounding & Position Manager<br/>• Dynamic Sizing Auto-adjust<br/>• Partial TP 50% & Trailing Stop<br/>• High-Water Mark Ledger"]
+    end
+
+    subgraph LAYER_5["5. Ingestion & Data Layer"]
+        BYBIT_CONNECTOR["Bybit Spot Connector<br/>• WS Public/Private<br/>• REST OHLCV M1-D1"]
+        SOLANA_POLLER["Solana RPC/WS Poller<br/>(Adaptive 10-30s Interval)"]
+        DEX_PARSER["DEX Swap Instruction Parser<br/>(Raydium AMM / Orca / Jupiter)"]
+        DEDUPLICATOR["Signature Deduplicator<br/>(Unique Base58 Hash)"]
+    end
+
+    subgraph LAYER_6["6. Persistence Layer"]
+        REPO_WALLETS["Wallet & Token Repos"]
+        REPO_SIGNALS["Signal & Risk Check Repos"]
+        REPO_ORDERS["Paper Order & Trade Repos"]
+        REPO_PORTFOLIO["Position & Ledger Repos"]
+        ALEMBIC["Alembic DB Migrations"]
+    end
+
+    subgraph LAYER_7["7. Observability & Circuit Breaker Layer"]
+        CIRCUIT_BREAKER["Circuit Breaker & Safety (Box 8)<br/>• Daily Loss >= 2%<br/>• Drawdown >= 8%<br/>• Data Stale Lockout<br/>• Emergency Kill Switch"]
+        AUDIT_LOGGER["Structured Audit Logger<br/>(JSON Output, No Secrets)"]
+        ALERT_DISPATCHER["Multi-Channel Alert Dispatcher<br/>(Telegram, Discord Webhook, Email)"]
+    end
+
+    %% Hubungan Komponen
+    ROUTER_API --> AUTH_MIDDLEWARE
+    AUTH_MIDDLEWARE --> REPO_PORTFOLIO
+    AUTH_MIDDLEWARE --> REPO_SIGNALS
+    TG_CONTROLLER --> CIRCUIT_BREAKER
+
+    BYBIT_CONNECTOR --> DEDUPLICATOR
+    SOLANA_POLLER --> DEX_PARSER
+    DEX_PARSER --> DEDUPLICATOR
+    DEDUPLICATOR --> REPO_WALLETS
+    DEDUPLICATOR --> HERMES_CORE
+
+    HERMES_CORE --> AGENT_TOKEN
+    HERMES_CORE --> AGENT_MARKET
+    HERMES_CORE --> AGENT_DISCOVERY
+    HERMES_CORE --> AGENT_STRATEGY
+
+    AGENT_MARKET -.->|Read Skill| SKILL_REGIME
+    AGENT_STRATEGY -.->|Read Skill| SKILL_SIGNAL
+    AGENT_TOKEN -.->|Read Skill| SKILL_SAFETY
+
+    AGENT_TOKEN --> GATEWAY_MGR
+    AGENT_MARKET --> GATEWAY_MGR
+    AGENT_STRATEGY --> GATEWAY_MGR
+
+    GATEWAY_MGR --> ADAPTER_OPENROUTER
+    GATEWAY_MGR -.->|Fallback| ADAPTER_9ROUTE
+    ADAPTER_OPENROUTER --> SCHEMA_VALIDATOR
+    ADAPTER_9ROUTE --> SCHEMA_VALIDATOR
+    SCHEMA_VALIDATOR --> AGENT_STRATEGY
+
+    AGENT_STRATEGY --> STRATEGY_ENG
+    STRATEGY_ENG --> RISK_GATE
+    RISK_GATE -.->|Read Skill| SKILL_RISK
+    RISK_GATE -->|PASS| PAPER_BROKER_ENG
+    RISK_GATE -->|REJECT| ALERT_DISPATCHER
+    RISK_GATE --> REPO_SIGNALS
+
+    PAPER_BROKER_ENG --> COMPOUNDING_LEDGER
+    COMPOUNDING_LEDGER -.->|Read Skill| SKILL_SIZING
+    COMPOUNDING_LEDGER --> REPO_ORDERS
+    COMPOUNDING_LEDGER --> REPO_PORTFOLIO
+    COMPOUNDING_LEDGER --> ALERT_DISPATCHER
+
+    CIRCUIT_BREAKER -->|Freeze Operations| RISK_GATE
+    CIRCUIT_BREAKER -->|Broadcast Alert| ALERT_DISPATCHER
+
+    REPO_WALLETS --> AUDIT_LOGGER
+    REPO_SIGNALS --> AUDIT_LOGGER
+    REPO_ORDERS --> AUDIT_LOGGER
+    REPO_PORTFOLIO --> AUDIT_LOGGER

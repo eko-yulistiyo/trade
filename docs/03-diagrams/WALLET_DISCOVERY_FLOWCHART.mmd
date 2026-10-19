@@ -1,0 +1,28 @@
+flowchart TD
+    %% WALLET DISCOVERY & TRADER PROFILING FLOWCHART - AUTO-TRADE-AA
+
+    START([Mulai Siklus Wallet Discovery]) --> INGEST_CANDIDATES[Kumpulkan Alamat Wallet Kandidat<br/>dari Transaksi Swap DEX Volume Besar / Leaderboard]
+    INGEST_CANDIDATES --> FETCH_HISTORY[Tarik Riwayat Transaksi Historis<br/>Minimal 30 Hari Terakhir via RPC / Solscan API]
+
+    FETCH_HISTORY --> SAMPLE_FILTER{Apakah Sampel Cukup?<br/>• Total Trades >= 30<br/>• Umur Aktivitas >= 30 Hari}
+
+    SAMPLE_FILTER -- TIDAK --> DISCARD_INSUFFICIENT[Buang Kandidat:<br/>Sampel Data Tidak Signifikan Secara Statistik] --> END_DISCOVERY([Selesai])
+    SAMPLE_FILTER -- YA --> CALCULATE_METRICS[Hitung Metrik Kinerja Bersih dari Biaya:<br/>• Net Realized PnL (dikurangi Gas & DEX Fee)<br/>• Profit Factor = Total Profit / Total Loss<br/>• Maximum Drawdown (MDD)<br/>• Win Rate % & Avg Holding Time]
+
+    CALCULATE_METRICS --> ANOMALY_DETECTION{Deteksi Anomali & Manipulasi:<br/>• Indikasi Wash Trading?<br/>• Transaksi Bolak-balik Token Sendiri?<br/>• 1-Hit Wonder (Hanya 1 Koin Pump?)}
+
+    ANOMALY_DETECTION -- YA (MANIPULATIF) --> DISCARD_MANIPULATIVE[Tolak Kandidat:<br/>Terindikasi Manipulasi / Sniper Bot Tidak Konsisten] --> END_DISCOVERY
+    ANOMALY_DETECTION -- TIDAK (ORGANIK) --> CALC_SCORE[Hitung Skor Komposit Trader:<br/>Score = 0.4*PnL + 0.3*PF - 0.3*MDD]
+
+    CALC_SCORE --> SCORE_THRESHOLD{Apakah Skor Komposit<br/>>= 70 / 100?}
+
+    SCORE_THRESHOLD -- TIDAK --> ARCHIVE_LOW_SCORE[Arsipkan Wallet:<br/>Kinerja Kurang Konsisten] --> END_DISCOVERY
+    SCORE_THRESHOLD -- YA --> INSERT_PENDING[Simpan ke Database wallets<br/>Status: PENDING_REVIEW]
+
+    INSERT_PENDING --> NOTIFY_DASHBOARD[Tampilkan di Menu Wallet Explorer Dashboard<br/>Kirim Notifikasi Penemuan Trader ke Telegram]
+    NOTIFY_DASHBOARD --> USER_DECISION{Keputusan Operator Manusia<br/>(Human-in-the-Loop Approval)}
+
+    USER_DECISION -- REJECT / REMOVE --> UPDATE_REJECTED[Ubah Status Wallet menjadi ARCHIVED<br/>Jangan Pantau Transaksi] --> END_DISCOVERY
+    USER_DECISION -- APPROVE & MONITOR --> UPDATE_APPROVED[Ubah Status Wallet menjadi ACTIVE_MONITORED<br/>Sertakan dalam Siklus Polling Copy-Trade]
+
+    UPDATE_APPROVED --> SUCCESS_MONITOR[Wallet Aktif Masuk Daftar Pantau Sistem] --> END_DISCOVERY

@@ -1,0 +1,72 @@
+graph LR
+    %% DATA FLOW DIAGRAM - AUTO-TRADE-AA (END-TO-END PIPELINE)
+
+    subgraph SOURCES["1. Data Sources"]
+        BYBIT["Bybit API<br/>(WS Ticker, Book & OHLCV)"]
+        SOLANA["Solana RPC / Helius<br/>(Signatures & Raw Tx)"]
+        DEX_POOLS["DEX Screener / Birdeye<br/>(Pool Liquidity & Vol 24h)"]
+    end
+
+    subgraph INGESTION["2. Ingestion & Normalization"]
+        PARSER["Instruction Parser<br/>(DEX Swap / Ticker Normalizer)"]
+        DEDUP["Deduplicator<br/>(Base58 Signature Hash)"]
+    end
+
+    subgraph STORAGE_RAW["3. Raw Persistence"]
+        DB_OBS[("wallet_observations /<br/>market_snapshots")]
+    end
+
+    subgraph AI_PIPELINE["4. AI Multi-Agent & Skills"]
+        SKILLS[(".agents/skills/<br/>Dynamic Skills")]
+        HERMES["Hermes Orchestrator<br/>(Token, Market, Strategy)"]
+        GW["AI Model Gateway<br/>(OpenRouter / 9Route)"]
+    end
+
+    subgraph SIGNALS["5. Sinyal Terstruktur"]
+        SIG_DB[("trading_signals<br/>(Status: PENDING)")]
+    end
+
+    subgraph RISK["6. Risk Gate (9 Pintu)"]
+        RG{"Risk Gate Engine<br/>• Risk 0.5%<br/>• Daily Loss 2%<br/>• Drawdown 8%<br/>• Expectancy > 0"}
+        NO_TRADE["Status: NO TRADE<br/>(Log Reject & Alert)"]
+    end
+
+    subgraph EXECUTION["7. Paper Execution & Compounding"]
+        BROKER["Paper Broker Simulator<br/>• Slippage & Fee Bybit/DEX<br/>• Partial Fill Simulation"]
+        COMPOUND["Compounding & Position Engine<br/>• 50% TP1 & Trailing Stop<br/>• Auto-adjust Risk Sizing"]
+    end
+
+    subgraph SETTLEMENT["8. Pembukuan & Ledger"]
+        DB_TRADES[("paper_orders & paper_trades")]
+        DB_POS[("positions & portfolio_snapshots")]
+    end
+
+    subgraph CHANNELS["9. Diseminasi & Notifikasi"]
+        DASHBOARD["Web Dashboard UI<br/>(Candlestick, PnL, Positions)"]
+        ALERTS["Multi-Channel Alert<br/>(Telegram, Discord, Email)"]
+    end
+
+    %% Data Pipeline Connectors
+    BYBIT --> PARSER
+    SOLANA --> PARSER
+    DEX_POOLS --> PARSER
+
+    PARSER --> DEDUP
+    DEDUP --> DB_OBS
+
+    DB_OBS --> HERMES
+    SKILLS -.->|On-Demand Loading| HERMES
+    HERMES <--> GW
+    HERMES --> SIG_DB
+
+    SIG_DB --> RG
+    RG -->|GAGAL / Pelanggaran| NO_TRADE
+    NO_TRADE --> ALERTS
+
+    RG -->|LOLOS (PASS)| BROKER
+    BROKER --> COMPOUND
+    COMPOUND --> DB_TRADES
+    COMPOUND --> DB_POS
+
+    DB_POS --> DASHBOARD
+    COMPOUND --> ALERTS

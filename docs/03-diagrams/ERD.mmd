@@ -1,0 +1,249 @@
+erDiagram
+    %% ENTITY RELATIONSHIP DIAGRAM (ERD) - AUTO-TRADE-AA PLATFORM
+    %% Database Engine: PostgreSQL 16
+    %% Arsitektur: Hybrid Bybit Spot & Solana On-Chain Paper Trading
+
+    WALLETS ||--o{ WALLET_OBSERVATIONS : "memiliki riwayat"
+    TOKENS ||--o{ WALLET_OBSERVATIONS : "diperdagangkan dalam"
+    TOKENS ||--o{ MARKET_SNAPSHOTS : "memiliki snapshot harga"
+    TOKENS ||--o{ TRADING_SIGNALS : "dijadikan target sinyal"
+    
+    STRATEGIES ||--o{ STRATEGY_VERSIONS : "memiliki versi"
+    STRATEGY_VERSIONS ||--o{ AGENT_RUNS : "dieksekusi dalam"
+    AGENT_RUNS ||--o{ LLM_REQUESTS : "melakukan pemanggilan"
+    AGENT_RUNS ||--o{ TRADING_SIGNALS : "menghasilkan"
+
+    TRADING_SIGNALS ||--o{ RISK_CHECKS : "dievaluasi oleh"
+    RISK_CHECKS ||--o| PAPER_ORDERS : "menerbitkan jika lolos"
+    
+    PAPER_ORDERS ||--o{ PAPER_TRADES : "dieksekusi menjadi fill"
+    TOKENS ||--o{ POSITIONS : "aset yang dimiliki"
+    POSITIONS ||--o{ PAPER_TRADES : "dibuka/ditutup melalui"
+    
+    PORTFOLIO_SNAPSHOTS ||--o{ POSITIONS : "mencakup status"
+    USER_SETTINGS ||--o{ SYSTEM_EVENTS : "mengonfigurasi parameter"
+
+    WALLETS {
+        uuid id PK
+        varchar address UK "Alamat publik on-chain / Bybit Account Tag"
+        varchar chain "solana / bybit_spot"
+        varchar label "Nama alias dompet / trader"
+        varchar status "DISCOVERED / PENDING_REVIEW / ACTIVE_MONITORED / ARCHIVED"
+        numeric composite_score "Skor kinerja (0.00 - 100.00)"
+        numeric net_pnl_usd "Keuntungan bersih historis"
+        numeric win_rate_pct "Persentase kemenangan"
+        numeric profit_factor "Rasio profit vs loss"
+        numeric max_drawdown_pct "Penurunan puncak tertinggi"
+        timestamp last_active_at
+        timestamp approved_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    WALLET_OBSERVATIONS {
+        uuid id PK
+        uuid wallet_id FK
+        varchar tx_signature UK "Hash unik transaksi Base58 / Bybit Order ID"
+        varchar chain "solana / bybit_spot"
+        varchar dex_protocol "RAYDIUM / ORCA / JUPITER / BYBIT"
+        varchar action "BUY / SELL / TRANSFER_IN / TRANSFER_OUT / LP_ADD / LP_REMOVE"
+        uuid token_in_id FK "Token yang diserahkan"
+        uuid token_out_id FK "Token yang diterima"
+        numeric amount_in "Jumlah kuantitas masuk"
+        numeric amount_out "Jumlah kuantitas keluar"
+        numeric price_usd "Harga setara USD saat transaksi"
+        numeric network_fee_native "Biaya gas SOL / fee bursa"
+        varchar finality_status "confirmed / finalized"
+        timestamp block_time "Waktu blok on-chain"
+        jsonb raw_payload "Payload mentah transaksi"
+        timestamp ingested_at
+    }
+
+    TOKENS {
+        uuid id PK
+        varchar address UK "Mint address Solana / Simbol Bybit Spot"
+        varchar chain "solana / bybit_spot"
+        varchar symbol "SOL / BTC / ETH / BONK dll"
+        varchar name "Nama aset / token"
+        int decimals "Jumlah desimal token (misal 9 untuk SOL, 8 BTC)"
+        numeric min_lot_size "Ukuran lot minimum order"
+        numeric tick_size "Presisi minimum harga"
+        boolean is_blacklisted "Status daftar hitam"
+        boolean freeze_authority_revoked "Khusus Solana: status freeze"
+        boolean mint_authority_revoked "Khusus Solana: status minting"
+        numeric pool_liquidity_usd "Kedalaman likuiditas kolam terkini"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    MARKET_SNAPSHOTS {
+        uuid id PK
+        uuid token_id FK
+        numeric price_usd "Harga spot USD terkini"
+        numeric price_native "Harga dalam SOL atau USDT"
+        numeric volume_24h_usd "Volume transaksi 24 jam"
+        numeric pool_liquidity_usd "Total kedalaman likuiditas pool"
+        numeric bid_price "Best bid price"
+        numeric ask_price "Best ask price"
+        numeric spread_pct "Persentase selisih bid-ask"
+        varchar source "BYBIT_WS / HELIUS_RPC / RAYDIUM_POOL / DEXSCREENER"
+        timestamp snapshot_time "Waktu data diambil"
+        boolean is_stale "Flag kadaluarsa (> 30 detik)"
+    }
+
+    STRATEGIES {
+        uuid id PK
+        varchar name UK "TREND_FOLLOWING / MOMENTUM_BREAKOUT / MEAN_REVERSION / COPY_TRADE"
+        varchar description "Deskripsi logika strategi"
+        boolean is_active "Status aktif strategi"
+        timestamp created_at
+    }
+
+    STRATEGY_VERSIONS {
+        uuid id PK
+        uuid strategy_id FK
+        varchar version_tag "v1.0.0 / v1.1.0"
+        jsonb parameters_config "Parameter SL/TP, EMA, RSI, ATR thresholds"
+        boolean is_default "Versi default aktif"
+        timestamp deployed_at
+    }
+
+    AGENT_RUNS {
+        uuid id PK
+        uuid strategy_version_id FK
+        varchar agent_name "TOKEN_SAFETY / MARKET_CONTEXT / STRATEGY_SIGNAL / TRADER_PROFILER"
+        varchar task_type "REGIME_DETECTION / SIGNAL_SYNTHESIS / CONTRACT_AUDIT"
+        varchar status "STARTED / SUCCESS / FAILED / TIMEOUT"
+        numeric execution_time_ms "Latensi inferensi total"
+        timestamp created_at
+    }
+
+    LLM_REQUESTS {
+        uuid id PK
+        uuid agent_run_id FK
+        varchar provider "OPENROUTER / 9ROUTE"
+        varchar model_name "claude-3.5-haiku / llama-3.1-70b / gemini-flash"
+        int prompt_tokens "Jumlah token input"
+        int completion_tokens "Jumlah token output"
+        numeric cost_usd "Estimasi biaya pemanggilan"
+        numeric latency_ms "Waktu respons provider"
+        int status_code "HTTP Status (200, 429, 500)"
+        jsonb request_prompt_summary "Ringkasan prompt tanpa rahasia"
+        jsonb response_json "Respons terstruktur Pydantic"
+        timestamp requested_at
+    }
+
+    TRADING_SIGNALS {
+        uuid id PK
+        uuid agent_run_id FK
+        uuid token_id FK
+        varchar symbol "BTCUSDT / SOLUSDT / BONK"
+        varchar action "BUY / SELL / HOLD"
+        numeric target_entry_price "Harga rekomendasi masuk"
+        numeric suggested_stop_loss "Level harga stop loss awal"
+        numeric suggested_take_profit_1 "Level TP1 (50% parsial)"
+        numeric suggested_take_profit_2 "Level TP2 (100% penuh)"
+        numeric recommended_allocation_pct "Maksimum 0.5% risk allowance"
+        numeric confidence_score "Skor keyakinan (0.00 - 1.00)"
+        numeric estimated_winrate_pct "Estimasi probabilitas winrate"
+        text rationale "Alasan analitik AI"
+        varchar status "PENDING / REJECTED / EXECUTED / EXPIRED"
+        timestamp generated_at
+        timestamp expires_at
+    }
+
+    RISK_CHECKS {
+        uuid id PK
+        uuid trading_signal_id FK
+        boolean passed "Status mutlak: TRUE (PASS) / FALSE (FAIL)"
+        boolean expectancy_check "Pintu 1: Expectancy bersih biaya > 0"
+        boolean risk_per_trade_check "Pintu 2: Risiko <= 0.5% equity"
+        boolean daily_loss_check "Pintu 3: Kerugian harian < 2.0%"
+        boolean drawdown_check "Pintu 4: Drawdown portofolio < 8.0%"
+        boolean spread_check "Pintu 5: Spread <= 0.08%"
+        boolean stop_loss_check "Pintu 6: Stop loss terdefinisi & R:R >= 1.5"
+        boolean balance_lot_check "Pintu 7: Saldo kas cukup & min lot valid"
+        boolean circuit_breaker_check "Pintu 8: Circuit breaker tidak aktif"
+        boolean data_freshness_check "Pintu 9: Usia data < 30 detik"
+        jsonb rejection_reasons "Daftar alasan penolakan jika gagal"
+        timestamp evaluated_at
+    }
+
+    PAPER_ORDERS {
+        uuid id PK
+        uuid risk_check_id FK
+        varchar client_order_id UK "UUID referensi lokal unik"
+        varchar symbol "BTCUSDT / SOLUSDT"
+        varchar side "BUY / SELL"
+        varchar order_type "MARKET / LIMIT"
+        numeric requested_quantity "Kuantitas unit token yang diajukan"
+        numeric requested_price "Harga saat pengajuan"
+        numeric calculated_dollar_risk "Nominal risiko 0.5% equity"
+        varchar status "SUBMITTED / PARTIAL_FILLED / FILLED / CANCELLED / REJECTED"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    PAPER_TRADES {
+        uuid id PK
+        uuid paper_order_id FK
+        uuid position_id FK
+        numeric executed_quantity "Kuantitas token yang terisi (fill)"
+        numeric executed_price "Harga fill aktual setelah slippage"
+        numeric slippage_pct "Slippage yang disimulasikan"
+        numeric transaction_fee_usd "Biaya transaksi Bybit/DEX simulasi"
+        numeric gas_fee_native "Biaya jaringan on-chain simulasi"
+        varchar execution_venue "BYBIT_SPOT_SIM / SOLANA_RAYDIUM_SIM"
+        timestamp executed_at
+    }
+
+    POSITIONS {
+        uuid id PK
+        uuid token_id FK
+        varchar symbol "BTCUSDT / SOLUSDT"
+        varchar status "OPEN / PARTIALLY_CLOSED / CLOSED"
+        numeric current_quantity "Kuantitas posisi aktif"
+        numeric average_entry_price "Harga beli rata-rata FIFO"
+        numeric current_stop_loss "Level Stop Loss aktif (bisa Breakeven)"
+        numeric take_profit_1 "Level harga TP1 (50% parsial)"
+        numeric take_profit_2 "Level harga TP2 (penuh)"
+        boolean is_tp1_hit "Status apakah TP1 sudah tercapai"
+        numeric trailing_stop_price "Level trailing stop jika aktif"
+        numeric realized_pnl_usd "Keuntungan/kerugian terealisasi bersih"
+        numeric unrealized_pnl_usd "Floating PnL terkini (mark-to-market)"
+        timestamp opened_at
+        timestamp closed_at
+        timestamp updated_at
+    }
+
+    PORTFOLIO_SNAPSHOTS {
+        uuid id PK
+        numeric total_equity_usd "Total nilai portofolio virtual"
+        numeric cash_balance_usd "Saldo kas virtual yang belum terpakai"
+        numeric open_positions_value_usd "Nilai pasar seluruh posisi terbuka"
+        numeric daily_realized_pnl_usd "Akumulasi PnL terealisasi hari ini"
+        numeric daily_loss_pct "Persentase penurunan ekuitas hari berjalan"
+        numeric high_water_mark_usd "Puncak tertinggi ekuitas historis"
+        numeric current_drawdown_pct "Persentase drawdown dari HWM"
+        numeric win_rate_pct "Win rate agregat simulasi"
+        numeric profit_factor "Profit factor agregat"
+        numeric net_expectancy_usd "Rata-rata ekspektasi keuntungan per trade"
+        timestamp snapshot_time
+    }
+
+    USER_SETTINGS {
+        varchar key PK "Kunci konfigurasi (misal: MAX_RISK_PER_TRADE_PCT)"
+        text value "Nilai parameter (misal: 0.005)"
+        varchar description "Penjelasan parameter"
+        boolean is_mutable "Apakah dapat diubah oleh operator via UI"
+        timestamp updated_at
+    }
+
+    SYSTEM_EVENTS {
+        uuid id PK
+        varchar event_type "CIRCUIT_BREAKER_TRIGGERED / EMERGENCY_STOP / RPC_DEGRADED"
+        varchar severity "INFO / WARNING / ERROR / CRITICAL"
+        text message "Deskripsi kejadian sistem"
+        jsonb metadata "Data konteks pendukung"
+        timestamp created_at
+    }

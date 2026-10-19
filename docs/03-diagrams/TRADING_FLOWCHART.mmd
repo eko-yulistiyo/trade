@@ -1,0 +1,68 @@
+flowchart TD
+    %% TRADING DECISION FLOWCHART - AUTO-TRADE-AA
+
+    START([Mulai Siklus Evaluasi Trading]) --> INGEST_SIGNAL[Terima Sinyal Terstruktur Baru<br/>dari Strategy Engine / Copy-Trade]
+
+    %% Pemeriksaan Kebaruan Data & Keamanan Simbol
+    INGEST_SIGNAL --> CHK_STALE{Apakah Usia Snapshot Data<br/>Pasar < 30 Detik?}
+    CHK_STALE -- TIDAK --> REJ_STALE[REJECT: Data Stale / Latensi Tinggi<br/>Tolak Order - Fail-Closed]
+    CHK_STALE -- YA --> CHK_SYMBOL{Apakah Simbol / Token Valid<br/>& Kontrak Aman?}
+    
+    CHK_SYMBOL -- TIDAK --> REJ_CONTRACT[REJECT: Token Tidak Valid /<br/>Mint/Freeze Authority Aktif]
+    CHK_SYMBOL -- YA --> CHK_CIRCUIT{Apakah Circuit Breaker<br/>Sedang Aktif?}
+
+    CHK_CIRCUIT -- YA (AKTIF) --> REJ_CIRCUIT[REJECT: Circuit Breaker Aktif<br/>Trading Sedang Dibekukan]
+    CHK_CIRCUIT -- TIDAK --> EVAL_RISK_GATE
+
+    %% 9 Pintu Risk Gate Deterministik
+    subgraph RISK_GATE_EVAL["EVALUASI 9 PINTU RISK GATE (KOTAK 3)"]
+        EVAL_RISK_GATE[Mulai Evaluasi Aturan Statis]
+        EVAL_RISK_GATE --> R1{1. Expectancy Positif<br/>setelah Biaya?}
+        R1 -- TIDAK --> RG_FAIL
+        R1 -- YA --> R2{2. Risk per Trade <= 0.5%<br/>dari Equity Terkini?}
+        R2 -- TIDAK --> RG_FAIL
+        R2 -- YA --> R3{3. Daily Loss Hari Berjalan<br/>< 2.0% Equity?}
+        R3 -- TIDAK --> RG_FAIL
+        R3 -- YA --> R4{4. Drawdown Portofolio<br/>< 8.0% High-Water Mark?}
+        R4 -- TIDAK --> RG_FAIL
+        R4 -- YA --> R5{5. Spread <= 0.08% &<br/>Likuiditas Pool Cukup?}
+        R5 -- TIDAK --> RG_FAIL
+        R5 -- YA --> R6{6. Stop Loss Valid &<br/>Risk:Reward >= 1:1.5?}
+        R6 -- TIDAK --> RG_FAIL
+        R6 -- YA --> R7{7. Saldo Kas Cukup &<br/>Memenuhi Min Lot Size?}
+        R7 -- TIDAK --> RG_FAIL
+        R7 -- YA --> RG_PASS[STATUS: LOLOS RISK GATE]
+        RG_FAIL[STATUS: GAGAL RISK GATE]
+    end
+
+    %% Keputusan & Penolakan
+    RG_FAIL --> ACTION_NO_TRADE[NO TRADE<br/>Batalkan Pembuatan Order]
+    ACTION_NO_TRADE --> LOG_REJECT[Simpan Record ke risk_checks<br/>Status: REJECTED + Alasan]
+    LOG_REJECT --> ALERT_REJECT[Kirim Alert Telegram / Discord<br/>jika Pelanggaran Batas Risiko]
+    ALERT_REJECT --> END_CYCLE([Selesai Siklus])
+
+    REJ_STALE --> ACTION_NO_TRADE
+    REJ_CONTRACT --> ACTION_NO_TRADE
+    REJ_CIRCUIT --> ACTION_NO_TRADE
+
+    %% Alur Eksekusi Paper Trading
+    RG_PASS --> CALC_SIZING[Hitung Sizing & Compounding<br/>Size = Equity x 0.005 / Delta SL]
+    CALC_SIZING --> SUBMIT_ORDER[Buat Record paper_orders<br/>Status: SUBMITTED]
+    SUBMIT_ORDER --> SIM_EXEC[Simulasi Matching Engine Bybit/DEX<br/>Hitung Slippage Realistis & Biaya Fee]
+    
+    SIM_EXEC --> FILL_CHECK{Apakah Order Terisi<br/>Penuh atau Sebagian?}
+    FILL_CHECK -- Sebagian --> RECORD_PARTIAL[Record paper_trades: PARTIAL_FILLED]
+    FILL_CHECK -- Penuh --> RECORD_FILL[Record paper_trades: FILLED]
+
+    RECORD_PARTIAL --> POSITION_MGMT
+    RECORD_FILL --> POSITION_MGMT
+
+    subgraph POSITION_MGMT["MANAJEMEN POSISI & EXIT (KOTAK 4 & 5)"]
+        SET_TP_SL[Pasang Parameter TP & SL:<br/>• TP1: Rasio 1.5R (Ambil 50% Profit)<br/>• TP2: Rasio 3.0R (Ambil Sisa 50%)<br/>• Trailing Stop ATR jika Strong Trend]
+        SET_TP_SL --> UPDATE_LEDGER[Perbarui Posisi & Equity Ledger<br/>Hitung Realized / Unrealized PnL FIFO]
+        UPDATE_LEDGER --> CHECK_COMPOUND[Update High-Water Mark &<br/>Kalibrasi Compounding Sizing Berikutnya]
+    end
+
+    CHECK_COMPOUND --> NOTIF_SUCCESS[Kirim Notifikasi Eksekusi ke Telegram<br/>Status: Order Terbuka, SL, TP1, TP2]
+    NOTIF_SUCCESS --> LOG_SUCCESS[Catat System Event Audit Trail Lengkap]
+    LOG_SUCCESS --> END_CYCLE

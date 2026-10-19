@@ -1,0 +1,54 @@
+graph TD
+    %% DEPLOYMENT ARCHITECTURE FLOWMAP - AUTO-TRADE-AA
+
+    subgraph PHASE_LOCAL["FASE 1: LINGKUNGAN PENGEMBANGAN LOKAL (MacBook M1 Pro)"]
+        HOST_MAC["Host Hardware: Apple MacBook Pro<br/>• Chip: Apple Silicon M1 Pro (ARM64)<br/>• RAM: 16 GB Unified Memory<br/>• OS: macOS"]
+
+        subgraph DOCKER_LOCAL["Docker Desktop Engine (Docker Compose)"]
+            NET_LOCAL["Bridge Network: auto_trade_net"]
+
+            CONT_FRONT["container: frontend<br/>• Image: node:20-alpine (ARM64)<br/>• Port: 3000:3000<br/>• RAM Limit: 1.5 GB"]
+            CONT_BACK["container: backend<br/>• Image: python:3.11-slim (ARM64)<br/>• Port: 8000:8000<br/>• RAM Limit: 2.5 GB"]
+            CONT_DB["container: postgres<br/>• Image: postgres:16-alpine<br/>• Port: 5432:5432<br/>• RAM Limit: 2.0 GB"]
+            CONT_REDIS["container: redis (Opsional)<br/>• Image: redis:7-alpine<br/>• Port: 6379<br/>• RAM Limit: 512 MB"]
+
+            CONT_FRONT <-->|HTTP API| CONT_BACK
+            CONT_BACK <-->|PostgreSQL Protocol| CONT_DB
+            CONT_BACK -.->|Cache Protocol| CONT_REDIS
+        end
+
+        HOST_MAC --> DOCKER_LOCAL
+        VOL_LOCAL[("Host Mount Persistence:<br/>./.data/postgres_data")] <--> CONT_DB
+    end
+
+    %% Gerbang Kesiapan Evaluasi Migrasi
+    PHASE_LOCAL --> GATE_EVAL{GERBANG EVALUASI KESIAPAN VPS:<br/>1. Paper Trading Stabil >= 2 Minggu?<br/>2. Zero Unhandled Crashes?<br/>3. Butuh Koneksi 24/7 Tanpa Laptop?}
+
+    GATE_EVAL -- TIDAK (Belum Siap / Belum Butuh) --> STAY_LOCAL[Tetap Beroperasi di MacBook M1 Pro<br/>Nol Biaya Server / CapEx]
+    STAY_LOCAL --> PHASE_LOCAL
+
+    GATE_EVAL -- YA (Disetujui Operator) --> PHASE_VPS
+
+    subgraph PHASE_VPS["FASE 2: OPSI MIGRASI TERKONTROL (VPS Indonesia / SG)"]
+        VPS_HOST["Server Cloud: VPS Indonesia (IDC / Biznet / Singapored)<br/>• Spek: 4 vCPU, 8-16 GB RAM, 80 GB NVMe<br/>• OS: Ubuntu 24.04 LTS (x86_64 / ARM Ampere)<br/>• Firewall: UFW (Hanya Buka Port 22 SSH & 443 HTTPS)"]
+
+        subgraph VPS_CONTAINERS["Docker Compose Production Environment"]
+            REV_PROXY["Reverse Proxy: Caddy / Nginx<br/>• Port 443: Let's Encrypt TLS Otomatis<br/>• Basic Auth / IP Allowlist"]
+            VPS_FRONT["container: frontend (Next.js Standalone)"]
+            VPS_BACK["container: backend (FastAPI Gunicorn/Uvicorn)"]
+            VPS_DB["container: postgres (PostgreSQL 16)"]
+
+            REV_PROXY --> VPS_FRONT
+            REV_PROXY --> VPS_BACK
+            VPS_FRONT <--> VPS_BACK
+            VPS_BACK <--> VPS_DB
+        end
+
+        VPS_HOST --> VPS_CONTAINERS
+        VPS_VOL[("VPS Storage Mount:<br/>/var/lib/docker/volumes/postgres_prod")] <--> VPS_DB
+    end
+
+    %% Alur Prosedur Migrasi
+    MIGRATE_PROC["Prosedur Migrasi Data:<br/>1. Backup pg_dump di MacBook Lokal<br/>2. Salin .env Produksi via SSH Key<br/>3. Eksekusi pg_restore di Kontainer VPS<br/>4. Verifikasi Health Check & Integrasi Telegram"]
+    GATE_EVAL -.->|Panduan Eksekusi| MIGRATE_PROC
+    MIGRATE_PROC --> PHASE_VPS

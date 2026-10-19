@@ -1,0 +1,48 @@
+flowchart TD
+    %% COPY TRADING FLOWCHART - AUTO-TRADE-AA
+
+    START([Mulai Siklus Copy Trading]) --> POLL_WALLETS[Polling Transaksi Wallet Aktif<br/>Status: ACTIVE_MONITORED via Solana RPC]
+    POLL_WALLETS --> DETECT_SIG{Ditemukan Signature Baru<br/>pada Blok Confirmed?}
+
+    DETECT_SIG -- TIDAK --> SLEEP_INTERVAL[Tunggu Interval Polling 10-30s] --> POLL_WALLETS
+    DETECT_SIG -- YA --> DEDUP_CHECK{Apakah Signature Sudah Ada<br/>di Database?}
+
+    DEDUP_CHECK -- YA (DUPLIKAT) --> IGNORE_DUPLICATE[Abaikan Transaksi<br/>Idempotent Silent Drop] --> END_COPY([Selesai])
+    DEDUP_CHECK -- TIDAK --> FETCH_RAW[Ambil Detail Payload Transaksi Mentah<br/>via Helius / Solana RPC getTransaction]
+
+    FETCH_RAW --> CLASSIFY_TX{Klasifikasi Jenis Transaksi}
+
+    CLASSIFY_TX -- Transfer SOL/SPL Biasa --> LOG_TRANSFER[Simpan wallet_observations<br/>Status: IGNORED_TRANSFER] --> END_COPY
+    CLASSIFY_TX -- Tambah/Tarik Likuiditas LP --> LOG_LP[Simpan wallet_observations<br/>Status: IGNORED_LP] --> END_COPY
+    CLASSIFY_TX -- DEX Swap (Raydium/Orca/Jup) --> PARSE_SWAP[Ekstrak Detail Swap:<br/>Action: BUY/SELL, Token In/Out, Price, Amount]
+
+    PARSE_SWAP --> SAVE_SWAP[Simpan wallet_observations<br/>Status: PARSED_SWAP]
+
+    %% Evaluasi Keamanan Token
+    SAVE_SWAP --> AUDIT_TOKEN{Audit Kontrak Token Target<br/>Freeze & Mint Authority Revoked?}
+
+    AUDIT_TOKEN -- TIDAK (BAHAYA) --> REJ_DANGEROUS[REJECT: Token Tidak Aman<br/>Risiko Honeypot / Rug Pull]
+    REJ_DANGEROUS --> LOG_AUDIT_REJ[Catat Penolakan ke Log Audit & Alert] --> END_COPY
+
+    AUDIT_TOKEN -- YA (AMAN) --> CHECK_LIQUIDITY{Likuiditas Pool AMM<br/>>= $20.000 USD?}
+    CHECK_LIQUIDITY -- TIDAK --> REJ_LIQUIDITY[REJECT: Likuiditas Rendah<br/>Slippage Terlalu Tinggi] --> LOG_AUDIT_REJ
+
+    CHECK_LIQUIDITY -- YA --> CHECK_ACTION{Arah Aksi Swap Master?}
+
+    %% Cabang BUY
+    CHECK_ACTION -- BUY --> PASS_TO_RISK[Teruskan ke Risk Gate 9 Pintu<br/>(Risk 0.5% Equity, Daily Loss 2%, DD 8%)]
+    PASS_TO_RISK --> EVAL_RISK{Lolos Risk Gate?}
+
+    EVAL_RISK -- TIDAK --> NO_TRADE_COPY[Status: NO TRADE<br/>Batalkan Order Copy] --> END_COPY
+    EVAL_RISK -- YA --> CALC_COPY_SIZE[Hitung Ukuran Sizing Proporsional:<br/>Maksimal Risiko 0.5% dari Equity Kita]
+    CALC_COPY_SIZE --> EXEC_PAPER_BUY[Eksekusi Paper Order BUY<br/>Simulasikan Slippage & Fee]
+    EXEC_PAPER_BUY --> NOTIF_BUY[Kirim Notifikasi Copy-Trade ke Telegram]
+    NOTIF_BUY --> END_COPY
+
+    %% Cabang SELL
+    CHECK_ACTION -- SELL --> CHECK_MY_POS{Apakah Kita Memiliki<br/>Posisi Terbuka pada Token Ini?}
+    CHECK_MY_POS -- TIDAK --> IGNORE_SELL[Abaikan Aksi Sell<br/>(Tidak Memiliki Posisi Terbuka)] --> END_COPY
+    CHECK_MY_POS -- YA --> EXEC_PAPER_SELL[Tutup Posisi / Partial Sell Sesuai Sinyal<br/>Hitung Realized PnL FIFO]
+    EXEC_PAPER_SELL --> UPDATE_LEDGER[Perbarui Equity Ledger & Compounding]
+    UPDATE_LEDGER --> NOTIF_SELL[Kirim Notifikasi Penjualan ke Telegram]
+    NOTIF_SELL --> END_COPY
